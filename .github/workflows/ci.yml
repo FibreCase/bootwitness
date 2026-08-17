@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  macos:
+    name: macOS / Rust 1.85
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install minimum Rust toolchain
+        run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt,clippy
+
+      - name: Check formatting
+        run: cargo +1.85.0 fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo +1.85.0 clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo +1.85.0 test --locked --all
+
+  debian-13-amd64:
+    name: Debian 13 amd64 / package toolchain
+    runs-on: ubuntu-latest
+    container: debian:13-slim
+    timeout-minutes: 30
+
+    steps:
+      - name: Install Debian build tools
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cargo \
+            file \
+            git \
+            rust-clippy \
+            rustc \
+            rustfmt \
+            systemd
+
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify target architecture and compiler
+        run: |
+          test "$(dpkg --print-architecture)" = "amd64"
+          rustc --version
+          cargo --version
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --all
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Verify Linux binary and systemd unit
+        run: |
+          file target/release/bootwitness | grep -q "ELF 64-bit"
+          install -D -m 0755 target/release/bootwitness /usr/bin/bootwitness
+          install -D -m 0644 README.md /usr/share/doc/bootwitness/README.md
+          systemd-analyze verify packaging/systemd/bootwitness.service
+
+      - name: Package release artifact
+        run: |
+          cd target/release
+          sha256sum bootwitness > bootwitness.sha256
+          tar -czf ../bootwitness-debian13-amd64.tar.gz \
+            bootwitness \
+            bootwitness.sha256
+
+      - name: Upload Debian release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootwitness-debian13-amd64-${{ github.sha }}
+          path: target/bootwitness-debian13-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 14

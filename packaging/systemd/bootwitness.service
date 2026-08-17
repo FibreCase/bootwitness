@@ -1,0 +1,42 @@
+[Unit]
+Description=Linux boot continuity monitor
+Documentation=file:/usr/share/doc/bootwitness/README.md
+Wants=time-sync.target
+After=local-fs.target time-sync.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bootwitness --database /var/lib/bootwitness/bootwitness.sqlite3 daemon --interval 60 --gap-factor 3
+Restart=always
+RestartSec=5s
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+
+DynamicUser=yes
+StateDirectory=bootwitness
+StateDirectoryMode=0750
+UMask=0027
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
