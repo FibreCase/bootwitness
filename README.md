@@ -93,7 +93,7 @@ sudo ./packaging/debian/install.sh
 ```bash
 cargo install cargo-deb
 cargo deb --locked
-sudo apt install ./target/debian/bootwitness_0.1.0-1_amd64.deb
+sudo apt install ./target/debian/bootwitness_0.1.1-1_amd64.deb
 sudo systemctl enable --now bootwitness.service
 ```
 
