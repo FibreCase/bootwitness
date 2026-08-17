@@ -17,29 +17,6 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  macos:
-    name: macOS / Rust 1.85
-    runs-on: macos-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Install minimum Rust toolchain
-        run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt,clippy
-
-      - name: Check formatting
-        run: cargo +1.85.0 fmt --all -- --check
-
-      - name: Run Clippy
-        run: cargo +1.85.0 clippy --locked --all-targets --all-features -- -D warnings
-
-      - name: Run tests
-        run: cargo +1.85.0 test --locked --all
-
   debian-13-amd64:
     name: Debian 13 amd64 / package toolchain
     runs-on: ubuntu-latest

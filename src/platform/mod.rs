@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::model::SystemSample;
 
@@ -22,6 +22,6 @@ impl SystemProbe for RealSystemProbe {
 #[cfg(not(target_os = "linux"))]
 impl SystemProbe for RealSystemProbe {
     fn sample(&self) -> Result<SystemSample> {
-        bail!("the real continuity probe is supported only on Linux")
+        anyhow::bail!("the real continuity probe is supported only on Linux")
     }
 }
