@@ -1,0 +1,197 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Match tag to Cargo package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$tag" =~ $semver ]]; then
+            echo "error: release tag must be a SemVer tag such as v0.2.0 or v1.0.0-rc.1" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+          manifest_version=$(awk -F '"' '/^version = "/ { print $2; exit }' Cargo.toml)
+          if [[ "$version" != "$manifest_version" ]]; then
+            echo "error: tag $tag does not match Cargo.toml version $manifest_version" >&2
+            exit 1
+          fi
+          tag_commit=$(git rev-list -n 1 "$tag")
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "error: tag $tag does not point to a commit reachable from main" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Linux ${{ matrix.architecture }}
+    needs: validate
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            uname: x86_64
+            target: x86_64-unknown-linux-musl
+            file-architecture: x86-64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            uname: aarch64
+            target: aarch64-unknown-linux-musl
+            file-architecture: ARM aarch64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify native runner architecture
+        run: test "$(uname -m)" = "${{ matrix.uname }}"
+
+      - name: Install musl build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            binutils \
+            file \
+            musl-tools
+          command -v musl-gcc
+
+      - name: Install Rust 1.85 target
+        run: rustup toolchain install 1.85.0 --profile minimal --target "${{ matrix.target }}"
+
+      - name: Run tests on native Linux
+        run: cargo +1.85.0 test --locked --all
+
+      - name: Build static release binary
+        env:
+          CC: musl-gcc
+        run: |
+          cargo +1.85.0 build \
+            --locked \
+            --release \
+            --target "${{ matrix.target }}" \
+            --config 'target.${{ matrix.target }}.linker="musl-gcc"'
+
+      - name: Verify and package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/bootwitness"
+          description=$(file "$binary")
+          echo "$description"
+          grep -Fq "${{ matrix.file-architecture }}" <<< "$description"
+          test "$("$binary" --version)" = "bootwitness ${{ needs.validate.outputs.version }}"
+          if readelf -l "$binary" | grep -q "Requesting program interpreter"; then
+            echo "error: release binary is dynamically linked" >&2
+            exit 1
+          fi
+
+          package="bootwitness-$GITHUB_REF_NAME-linux-${{ matrix.architecture }}"
+          stage="dist/$package"
+          mkdir -p "$stage"
+          install -m 0755 "$binary" "$stage/bootwitness"
+          install -m 0644 packaging/systemd/bootwitness.service "$stage/bootwitness.service"
+          install -m 0644 README.md "$stage/README.md"
+          install -m 0644 LICENSE "$stage/LICENSE"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.architecture }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release candidates
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz | LC_ALL=C sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "error: release $tag already exists" >&2
+            exit 1
+          fi
+
+          release_args=(
+            --verify-tag
+            --generate-notes
+            --fail-on-no-commits
+            --title "bootwitness $tag"
+          )
+          if [[ "$tag" == *-* ]]; then
+            release_args+=(--prerelease --latest=false)
+          fi
+
+          gh release create "$tag" \
+            "${release_args[@]}" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS

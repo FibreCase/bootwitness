@@ -1,13 +1,14 @@
 # bootwitness
 
 [![CI](https://github.com/FibreCase/bootwitness/actions/workflows/ci.yml/badge.svg)](https://github.com/FibreCase/bootwitness/actions/workflows/ci.yml)
+[![Release](https://github.com/FibreCase/bootwitness/actions/workflows/release.yml/badge.svg)](https://github.com/FibreCase/bootwitness/actions/workflows/release.yml)
 
 `bootwitness` 是一个面向 Linux/systemd 服务器的开机连续性监测器。它将 Linux
 内核的 boot ID、`CLOCK_BOOTTIME` 和持久化心跳写入 SQLite，用于发现重启、断电、
 内核崩溃以及监测进程自身的中断。
 
-目标部署平台是 Debian 13 amd64。核心逻辑和数据库测试可以在 macOS 上运行，但真实
-的 `daemon` 和 `check` 命令只支持 Linux。
+目标部署平台是使用 systemd 的 Debian 13 amd64/arm64。核心逻辑和数据库测试可以在
+macOS 上运行，但真实的 `daemon` 和 `check` 命令只支持 Linux。
 
 ## 判定模型
 
@@ -45,9 +46,37 @@ cargo build --locked --release
 在 macOS 上，测试通过模拟 boot ID 和时间推进验证状态转换，不读取或伪造 Linux
 的 `/proc` 数据。
 
+## 发布版本
+
+推送 `vX.Y.Z` 格式的 Git tag 会自动构建并发布两个静态 Linux 二进制：
+
+- `bootwitness-vX.Y.Z-linux-amd64.tar.gz`
+- `bootwitness-vX.Y.Z-linux-arm64.tar.gz`
+
+Release 同时附带 `SHA256SUMS`。两个架构都使用原生 GitHub runner 和 musl 静态
+链接，不依赖目标服务器安装 SQLite 动态库。`-rc.1` 等预发布标签会创建 GitHub
+Pre-release。
+
+发布前先更新 `Cargo.toml` 中的版本并同步 `Cargo.lock`，提交到 `main`，然后创建
+与其完全一致的标签：
+
+```bash
+# 示例：发布 0.2.0
+# 先将 Cargo.toml 的 version 修改为 0.2.0
+cargo check
+git add Cargo.toml Cargo.lock
+git commit -m "Release 0.2.0"
+git push origin main
+git tag -a v0.2.0 -m "bootwitness 0.2.0"
+git push origin v0.2.0
+```
+
+如果标签不是合法 SemVer、标签版本与 `Cargo.toml` 不一致，或者标签对应的提交不在
+`main` 历史中，Release Workflow 会直接失败，不会发布错误版本。
+
 ## Debian 13 安装
 
-在 Debian 13 amd64 主机上安装 Rust 工具链并构建 release 二进制，然后运行：
+在 Debian 13 amd64 或 arm64 主机上安装 Rust 工具链并构建 release 二进制，然后运行：
 
 ```bash
 sudo ./packaging/debian/install.sh

@@ -5,9 +5,9 @@
 These instructions apply to the entire repository.
 
 `bootwitness` is a small reliability tool for monitoring Linux boot continuity.
-The deployment target is Debian 13 amd64 with systemd. Development and core
-logic tests must continue to work on macOS, but macOS must never emulate or
-pretend to provide the real Linux continuity probe.
+The deployment target is Debian 13 on amd64 and arm64 with systemd. Development
+and core logic tests must continue to work on macOS, but macOS must never
+emulate or pretend to provide the real Linux continuity probe.
 
 Read `README.md` before making changes that affect event semantics, persistence,
 deployment, or operator-facing commands.
@@ -102,7 +102,8 @@ cargo +1.85.0 test --locked --all
 ```
 
 For Debian/systemd changes, run the Debian 13 GitHub Actions job or equivalent
-container checks, including a release build and `systemd-analyze verify`.
+container checks, including a release build and `systemd-analyze verify`. For
+release changes, preserve native amd64/arm64 builds and static-link validation.
 
 ## Handoff expectations
 
